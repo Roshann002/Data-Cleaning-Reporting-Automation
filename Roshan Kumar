@@ -1,0 +1,239 @@
+# 🧹 Data Cleaning & Reporting Automation
+
+## Project Overview
+A complete automated pipeline that takes a **deliberately messy** retail transactions dataset
+and transforms it into clean, analysis-ready data — with full audit logging, visual charts,
+and an interactive Streamlit dashboard.
+
+---
+
+## Folder Structure
+```
+data_cleaning_automation/
+├── run_all.py                               ← ONE-CLICK launcher
+├── requirements.txt
+├── README.md
+├── data/
+│   └── raw_transactions.csv                 ← Messy input (auto-generated)
+├── src/
+│   ├── generate_data.py                     ← Injects 8 types of data issues
+│   ├── data_cleaner.py                      ← Full automated cleaning pipeline
+│   └── report_generator.py                  ← Self-contained HTML report
+├── dashboard/
+│   └── app.py                               ← Streamlit 4-tab dashboard
+├── notebook/
+│   └── Data_Cleaning_Automation.ipynb       ← Step-by-step Jupyter walkthrough
+├── output/
+│   ├── cleaned_transactions.csv             ← Final clean dataset
+│   ├── 01_quality_scorecard.png
+│   ├── 02_missing_values.png
+│   ├── 03_revenue_analysis.png
+│   ├── 04_monthly_trend.png
+│   ├── 05_distributions.png
+│   └── 06_audit_rating.png
+└── reports/
+    ├── data_report.html                     ← Full standalone HTML report
+    ├── audit_log.csv                        ← Step-by-step cleaning audit
+    └── cleaning_summary.json               ← Machine-readable summary
+```
+
+---
+
+## Quick Start
+```bash
+cd data_cleaning_automation
+python run_all.py
+```
+Installs deps → generates messy data → cleans it → builds HTML report → launches dashboard.
+
+---
+
+## Data Issues Injected (8 Types)
+
+| # | Issue Type | Description |
+|---|-----------|-------------|
+| 1 | **Missing values** | ~8% nulls in Age, Income, Region, Rating, PaymentMethod |
+| 2 | **Duplicates** | 30 duplicate rows randomly inserted |
+| 3 | **Inconsistent text** | "north", "NORTH", "Nort", "Northern" → should all be "North" |
+| 4 | **Outliers** | Age=999, UnitPrice=-100, CustomerRating=99 |
+| 5 | **Bad date formats** | "March 5 2023", "abcd", "", "N/A", "20230901" |
+| 6 | **Negative values** | Negative Quantity and Revenue rows |
+| 7 | **Whitespace padding** | "  Alice Johnson  " with leading/trailing spaces |
+| 8 | **Typos** | "Completd", "Pendig", "Canceld", "CreditCard" |
+
+---
+
+## 🎓 Viva Questions & Answers
+
+### Q1: What is Data Cleaning? Why is it important?
+**A:** Data cleaning (also called data wrangling or data preprocessing) is the process of
+identifying and correcting errors, inconsistencies, and inaccuracies in a dataset before
+analysis. It is important because:
+- "Garbage In, Garbage Out" — dirty data leads to wrong conclusions
+- Up to **80% of a data scientist's time** is spent on data cleaning
+- Business decisions based on dirty data cost companies millions
+- Models trained on dirty data produce unreliable predictions
+
+---
+
+### Q2: What types of data quality issues exist?
+**A:**
+| Issue | Example | Fix |
+|-------|---------|-----|
+| Missing values | `NaN` in Age column | Impute with median/mode or drop |
+| Duplicates | Same transaction recorded twice | `drop_duplicates()` |
+| Inconsistent text | "north", "NORTH", "Nort" | Fuzzy matching + title case |
+| Outliers | Age = 999 | Clamp to valid range / replace with median |
+| Wrong data types | Date stored as "March 5 2023" | `pd.to_datetime()` with multiple formats |
+| Negative values | Quantity = -5 | Set minimum threshold |
+| Whitespace | "  Alice  " | `.str.strip()` |
+| Typos | "Completd" | `difflib.get_close_matches()` |
+
+---
+
+### Q3: How do you handle missing values?
+**A:** Strategy depends on the column type and amount of missing data:
+- **Numerical columns** (Age, UnitPrice): **Median imputation** — robust to outliers.
+  Mean imputation is pulled by extreme values; median is safer.
+- **Categorical columns** (Region, PaymentMethod): **Mode imputation** — most frequent value.
+- **Text columns** (CustomerName): Fill with sentinel value "Unknown".
+- **Time-series** (Date): **Linear interpolation** — uses surrounding values.
+- If >50% missing: consider dropping the column entirely.
+
+```python
+df["Age"].fillna(df["Age"].median(), inplace=True)
+df["Region"].fillna(df["Region"].mode()[0], inplace=True)
+df["Date"].interpolate(method="linear", inplace=True)
+```
+
+---
+
+### Q4: How do you fix inconsistent text / typos automatically?
+**A:** We use Python's `difflib.get_close_matches()` for fuzzy string matching:
+```python
+from difflib import get_close_matches
+
+valid = ["North", "South", "East", "West", "Central"]
+val = "NORT"  # typo
+
+# Normalise: lowercase, strip whitespace
+v = val.strip().lower()
+
+# Exact match first
+for vv in valid:
+    if vv.lower() == v:
+        return vv   # returns "North" if it's just case issue
+
+# Fuzzy match (cutoff=0.6 means 60% similarity needed)
+matches = get_close_matches(v, [x.lower() for x in valid], n=1, cutoff=0.6)
+# "nort" → matches "north" → returns "North"
+```
+This handles case differences, typos, trailing spaces, and abbreviations.
+
+---
+
+### Q5: How are outliers detected and handled?
+**A:** We use **domain-knowledge-based clamping** (not statistical methods like IQR alone,
+because our ranges have meaningful business boundaries):
+
+```python
+# Age: valid range is 18–100
+df.loc[(df["Age"] < 18) | (df["Age"] > 100), "Age"] = df["Age"].median()
+
+# UnitPrice: must be positive and under $10,000
+df.loc[(df["UnitPrice"] <= 0) | (df["UnitPrice"] > 10000), "UnitPrice"] = df["UnitPrice"].median()
+
+# Rating: must be 1–5
+df.loc[(df["CustomerRating"] < 1) | (df["CustomerRating"] > 5), "CustomerRating"] = 3.0
+```
+
+For statistical outlier detection, we could also use:
+- **IQR method**: outlier if value < Q1 - 1.5×IQR or > Q3 + 1.5×IQR
+- **Z-score method**: outlier if |z-score| > 3
+
+---
+
+### Q6: What is an Audit Log and why do we create one?
+**A:** An audit log is a chronological record of every cleaning step performed, including:
+- What step was taken ("Duplicates removed")
+- What changed ("30 rows dropped")
+- Before/after counts
+
+**Why important:**
+- **Reproducibility** — anyone can see exactly what was done
+- **Compliance** — required in regulated industries (finance, healthcare)
+- **Debugging** — if results seem wrong, you can trace each transformation
+- **Documentation** — serves as the data dictionary for the cleaned dataset
+
+In our project, every step calls `log()` which appends to `audit_log.csv`.
+
+---
+
+### Q7: What is the difference between `drop_duplicates()` strategies?
+**A:**
+```python
+# Keep first occurrence (default)
+df.drop_duplicates(keep="first", inplace=True)
+
+# Keep last occurrence
+df.drop_duplicates(keep="last", inplace=True)
+
+# Drop ALL copies of any duplicate
+df.drop_duplicates(keep=False, inplace=True)
+
+# Duplicate on specific columns only
+df.drop_duplicates(subset=["CustomerID","Date","Product"], keep="first")
+```
+We use the default (`keep="first"`) — reasonable assumption that the first recorded
+transaction is the original.
+
+---
+
+### Q8: How is the automated HTML report generated?
+**A:** The report is built with pure Python string formatting:
+1. Charts are saved as PNG files
+2. Each PNG is **base64-encoded** and embedded directly into the HTML
+3. KPIs are computed from the cleaned DataFrame
+4. The audit log table is generated from the audit CSV
+5. The entire file is written as a single `.html` — no server needed, opens in any browser
+
+```python
+import base64
+with open("output/chart.png", "rb") as f:
+    b64 = base64.b64encode(f.read()).decode()
+img_tag = f'<img src="data:image/png;base64,{b64}">'
+```
+This creates a **fully self-contained report** — no external dependencies.
+
+---
+
+### Q9: Frontend vs Backend in this project?
+**A:**
+```
+generate_data.py  →  data_cleaner.py  →  report_generator.py
+  (Data layer)         (Backend)            (Report output)
+                                    ↓
+                           output/*.png + CSV + JSON
+                                    ↓
+                         dashboard/app.py (Frontend — Streamlit)
+```
+- **Backend**: Python scripts doing the actual data processing (pandas, numpy)
+- **Frontend**: Streamlit dashboard that reads processed files and renders interactive UI
+- **Bridge**: CSV and JSON files pass data between layers
+
+---
+
+### Q10: How would you scale this to a production environment?
+**A:**
+1. **Scheduling**: Run with Apache Airflow or cron jobs for nightly automated runs
+2. **Database**: Read from and write to PostgreSQL/MySQL instead of CSV files
+3. **Cloud**: Deploy on AWS Lambda (serverless) or Azure Data Factory
+4. **Alerting**: Send email/Slack notification when data quality drops below threshold
+5. **API**: Wrap cleaning logic in FastAPI endpoints for real-time cleaning
+6. **Monitoring**: Track data quality metrics over time in a time-series DB (InfluxDB)
+7. **Version control**: Store cleaned datasets with date-stamped filenames
+
+---
+
+*Built for Data Cleaning & Reporting Automation · Python · pandas · matplotlib · Streamlit*
+Author :- Roshan Kumar
